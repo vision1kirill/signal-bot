@@ -70,6 +70,11 @@ def start_bot(bot_instance: Bot):
 
     Bot.objects.filter(id=bot_instance.id).update(is_active=True)
 
+    # ВАЖНО: добавляем запись в active_bots ДО старта потока —
+    # иначе поток может проверить словарь раньше чем мы его заполним
+    # и сразу выйти из while-цикла (race condition)
+    active_bots[bot_instance.id] = {"thread": None, "bot": None}
+
     thread = threading.Thread(
         target=run_bot_instance,
         args=(bot_instance,),
@@ -78,7 +83,7 @@ def start_bot(bot_instance: Bot):
     )
     thread.start()
 
-    active_bots[bot_instance.id] = {"thread": thread, "bot": None}
+    active_bots[bot_instance.id]["thread"] = thread
     logger.info("бот '%s' запущен (thread=%s)", bot_instance.name, thread.name)
 
 
