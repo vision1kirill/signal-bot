@@ -330,13 +330,23 @@ class ExpirationAdmin(admin.ModelAdmin):
 @admin.register(Postback)
 class PostbackAdmin(admin.ModelAdmin):
     list_display = (
-        "bot", "user_id", "chat_id", "link_id",
+        "bot", "user_id", "telegram_username", "chat_id", "link_id",
         "deposit", "deposit_amount", "created_at", "deposited_at",
     )
     list_filter = ("bot", "link_id", "deposit")
     search_fields = ("user_id", "chat_id", "link_id")
     readonly_fields = ("created_at", "deposited_at")
     ordering = ("-created_at",)
+
+    def telegram_username(self, obj):
+        """имя пользователя telegram по chat_id из постбэка."""
+        if not obj.chat_id:
+            return "—"
+        user = User.objects.filter(bot=obj.bot, chat_id=obj.chat_id).first()
+        if user and user.username:
+            return f"@{user.username}"
+        return "—"
+    telegram_username.short_description = "Telegram"
 
 
 # =========================================================
@@ -345,11 +355,19 @@ class PostbackAdmin(admin.ModelAdmin):
 
 @admin.register(User)
 class UserAdmin(admin.ModelAdmin):
-    list_display = ("chat_id", "username", "bot", "language", "access_status")
+    list_display = ("chat_id", "username", "platform_user_id", "bot", "language", "access_status")
     list_filter = ("bot", "language")
     search_fields = ("chat_id", "username")
     readonly_fields = ("chat_id", "username", "topic_id")
     ordering = ("bot", "chat_id")
+
+    def platform_user_id(self, obj):
+        """id пользователя на платформе из постбэка."""
+        postback = Postback.objects.filter(
+            bot=obj.bot, chat_id=obj.chat_id
+        ).exclude(user_id="").order_by("-created_at").first()
+        return postback.user_id if postback else "—"
+    platform_user_id.short_description = "ID платформы"
 
     def access_status(self, obj):
         """показывает статус доступа пользователя."""
