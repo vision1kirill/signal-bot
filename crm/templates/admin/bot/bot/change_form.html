@@ -6,14 +6,14 @@
     {% if original %}
         <div style="margin-left: 10px; display:inline-block;">
             <strong>Статус:</strong>
-            {% if original.is_active %}
+            {% if bot_is_running %}
                 🟢 Запущен
             {% else %}
                 🔴 Остановлен
             {% endif %}
         </div>
         <a class="button" href="{% url 'admin:bot_toggle' original.pk %}">
-            {% if original.is_active %}
+            {% if bot_is_running %}
                 Остановить
             {% else %}
                 Запустить

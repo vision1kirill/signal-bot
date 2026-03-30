@@ -15,7 +15,7 @@ from bot.models import (
     TempAccess, MultiChat, User, BotMarketing, CustomSignal, Channel
 )
 from crm.models import Market, Pair, Expiration
-from bot.utils import start_bot, stop_bot
+from bot.utils import start_bot, stop_bot, active_bots
 
 import logging
 logger = logging.getLogger(__name__)
@@ -104,8 +104,8 @@ class BotMarketingInline(admin.TabularInline):
 
 class CustomSignalInline(admin.TabularInline):
     model = CustomSignal
-    extra = 5
-    max_num = 5
+    extra = 0
+    max_num = 20
     fields = ("chat_id", "order", "direction")
     classes = ("collapse",)
 
@@ -266,6 +266,16 @@ class BotAdmin(admin.ModelAdmin):
         ]
         return custom_urls + urls
 
+    def change_view(self, request, object_id, form_url="", extra_context=None):
+        """передаём в шаблон реальный статус бота из active_bots."""
+        extra_context = extra_context or {}
+        try:
+            bot_id = int(object_id)
+            extra_context["bot_is_running"] = bot_id in active_bots
+        except (TypeError, ValueError):
+            extra_context["bot_is_running"] = False
+        return super().change_view(request, object_id, form_url, extra_context)
+
     def toggle_bot(self, request, bot_id):
         """включает или выключает бота."""
         try:
@@ -274,16 +284,17 @@ class BotAdmin(admin.ModelAdmin):
             self.message_user(request, "Бот не найден!", level="error")
             return HttpResponseRedirect(request.META.get("HTTP_REFERER", "/admin/"))
 
-        if not bot.is_active:
+        # проверяем реальный статус по active_bots — не по БД
+        is_running = bot_id in active_bots
+        if not is_running:
             start_bot(bot)
         else:
             stop_bot(bot)
 
-        # перечитываем статус после переключения
-        bot.refresh_from_db()
+        now_running = bot_id in active_bots
         self.message_user(
             request,
-            f"Бот {bot.name} теперь {'🟢 запущен' if bot.is_active else '🔴 остановлен'}",
+            f"Бот {bot.name} теперь {'🟢 запущен' if now_running else '🔴 остановлен'}",
         )
         return HttpResponseRedirect(request.META.get("HTTP_REFERER", "/admin/"))
 

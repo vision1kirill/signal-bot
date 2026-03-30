@@ -137,15 +137,22 @@ def new_bot(bot_instance: Bot):
 
             method_key = "signal_" + directions
 
-        # ищем текст в нужном языке, fallback на английский
-        lang_result = result.get(language) or result.get("en") or {}
-        msg_data = lang_result.get(method_key)
-        if not msg_data:
-            # повторная попытка через английский
-            msg_data = (result.get("en") or {}).get(method_key)
-        if not msg_data:
+        # свежий запрос к БД — изменения в админке отражаются без перезапуска
+        msg_db = (
+            Message.objects.filter(
+                bot=bot_instance, method=method_key, language=language
+            ).select_related("image").first()
+            or Message.objects.filter(
+                bot=bot_instance, method=method_key, language="en"
+            ).select_related("image").first()
+        )
+        if not msg_db:
             logger.warning("сообщение с методом '%s' не найдено", method_key)
             return
+        msg_data = {
+            "text": msg_db.text or "",
+            "image": msg_db.image.image.path if msg_db.image else None,
+        }
 
         # --- формирование текста сигнала ---
         # direction уже определён выше (из очереди кастомных или рандомно)
@@ -625,8 +632,9 @@ def new_bot(bot_instance: Bot):
         entered_id = message.text.strip()
 
         # проверяем: не занят ли этот id другим аккаунтом
+        # сначала точный поиск по lid, затем fallback без lid — на случай расхождения
         already_claimed = Postback.objects.filter(
-            user_id=entered_id, link_id=lid
+            user_id=entered_id
         ).exclude(chat_id="").first()
         if already_claimed:
             # этот platform id уже привязан к другому telegram-аккаунту
@@ -640,10 +648,16 @@ def new_bot(bot_instance: Bot):
             )
             return
 
-        # ищем незаявленный постбэк с таким id
-        postback_obj = Postback.objects.filter(
-            user_id=entered_id, chat_id="", link_id=lid
-        ).first()
+        # ищем незаявленный постбэк: сначала с точным lid, потом без него
+        postback_obj = None
+        if lid:
+            postback_obj = Postback.objects.filter(
+                user_id=entered_id, chat_id="", link_id=lid
+            ).first()
+        if not postback_obj:
+            postback_obj = Postback.objects.filter(
+                user_id=entered_id, chat_id=""
+            ).first()
 
         if postback_obj:
             postback_obj.chat_id = str(message.chat.id)
