@@ -7,6 +7,8 @@ import threading
 import logging
 import os
 
+from django.db import close_old_connections
+
 from .models import Bot, User, BotAccess, TempAccess, BotMarketing, Channel
 from .bot import new_bot, send_access_message, send_deposit_feed
 
@@ -28,6 +30,10 @@ def run_bot_instance(bot_instance: Bot):
     """
     retry_delay = 5   # начальная задержка перезапуска в секундах
     max_delay   = 120 # максимальная задержка
+
+    # закрываем унаследованные соединения из основного процесса —
+    # SQLite не thread-safe, каждый поток должен открыть своё соединение
+    close_old_connections()
 
     while bot_instance.id in active_bots:
         try:
