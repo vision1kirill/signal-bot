@@ -63,11 +63,13 @@ def _dispatch(request, platform: str):
     lid = data["lid"]
     status = data["status"]
 
-    if not uid or not lid:
-        logger.warning(
-            "[%s] постбэк без uid или lid: %s", platform, params
-        )
+    # uid обязателен всегда; lid может отсутствовать (напр. subid не задан у Binarium)
+    if not uid:
+        logger.warning("[%s] постбэк без uid: %s", platform, params)
         return HttpResponse(status=400)
+
+    if not lid:
+        logger.warning("[%s] постбэк без lid (subid пустой?): uid=%s params=%s", platform, uid, params)
 
     try:
         if status == "reg":
