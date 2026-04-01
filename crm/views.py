@@ -1,65 +1,103 @@
 """
-обработчик постбэков от платформы pocket option.
-принимает события о регистрации и депозите (ftd).
+обработчик постбэков от торговых платформ.
+
+поддерживаемые платформы:
+    /postback/          — Pocket Option (обратная совместимость)
+    /postback/pocket/   — Pocket Option
+    /postback/binarium/ — Binarium / CleverAff
+
+каждый эндпоинт нормализует параметры через crm.postback_adapters
+и передаёт их в общие обработчики _handle_registration / _handle_deposit.
 """
 
 import logging
 from decimal import Decimal, InvalidOperation
 
-from django.shortcuts import render
-from django.http import HttpResponse, JsonResponse
+from django.http import HttpResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.utils import timezone
 
 from bot.models import Bot, Postback
 from bot.utils import send_postback
 from bot.pixel import send_lead_event, send_purchase_event
+from .postback_adapters import normalize
 
 logger = logging.getLogger(__name__)
 
 
+# =========================================================
+# публичные эндпоинты
+# =========================================================
+
 @csrf_exempt
 def postback_view(request):
-    """
-    принимает get-запросы от платформы с параметрами:
-        status=reg  — новая регистрация (uid, lid обязательны)
-        status=ftd  — первый депозит     (uid, lid, payout обязательны)
+    """Pocket Option — оригинальный эндпоинт (обратная совместимость)."""
+    return _dispatch(request, platform="pocket")
 
-    также поддерживает legacy-формат: параметр ftd вместо status=ftd.
+
+@csrf_exempt
+def postback_pocket_view(request):
+    """Pocket Option — именованный эндпоинт."""
+    return _dispatch(request, platform="pocket")
+
+
+@csrf_exempt
+def postback_binarium_view(request):
+    """Binarium / CleverAff — эндпоинт."""
+    return _dispatch(request, platform="binarium")
+
+
+# =========================================================
+# диспетчер
+# =========================================================
+
+def _dispatch(request, platform: str):
+    """
+    нормализует параметры запроса под стандартный формат
+    и вызывает нужный обработчик.
     """
     params = request.GET.dict()
-    status = params.get("status", "")
-    uid = params.get("uid", "").strip()
-    lid = params.get("lid", "").strip()
+    data = normalize(platform, params)
+
+    uid = data["uid"]
+    lid = data["lid"]
+    status = data["status"]
 
     if not uid or not lid:
-        logger.warning("постбэк без uid или lid: %s", params)
+        logger.warning(
+            "[%s] постбэк без uid или lid: %s", platform, params
+        )
         return HttpResponse(status=400)
 
     try:
         if status == "reg":
-            _handle_registration(uid, lid, params)
-
-        elif status == "ftd" or params.get("ftd"):
-            # поддержка обоих форматов: status=ftd и ftd=1
-            _handle_deposit(uid, lid, params)
-
+            _handle_registration(uid, lid, data, platform)
+        elif status == "ftd":
+            _handle_deposit(uid, lid, data, platform)
         else:
-            logger.warning("постбэк с неизвестным статусом: %s", params)
-
+            logger.warning(
+                "[%s] постбэк с неизвестным статусом '%s': %s",
+                platform, status, params,
+            )
     except Exception as e:
-        logger.error("необработанная ошибка постбэка params=%s: %s", params, e)
+        logger.error(
+            "[%s] необработанная ошибка uid=%s lid=%s: %s",
+            platform, uid, lid, e,
+        )
         return HttpResponse(status=500)
 
     return HttpResponse(status=200)
 
 
-def _handle_registration(uid: str, lid: str, params: dict):
+# =========================================================
+# обработчики событий (общие для всех платформ)
+# =========================================================
+
+def _handle_registration(uid: str, lid: str, data: dict, platform: str):
     """
     обрабатывает событие регистрации.
-    создаёт запись постбэка и отправляет уведомление в канал и facebook pixel.
+    get_or_create предотвращает дубликаты при повторных постбэках.
     """
-    # get_or_create предотвращает дубликаты при повторных постбэках
     postback_obj, created = Postback.objects.get_or_create(
         user_id=uid,
         link_id=lid,
@@ -67,64 +105,66 @@ def _handle_registration(uid: str, lid: str, params: dict):
     )
 
     if created:
-        logger.info("регистрация: новый пользователь uid=%s lid=%s", uid, lid)
-        # уведомляем telegram-канал о регистрации (передаём бота для фильтрации канала)
-        send_postback({**params, "status": "reg"}, bot_instance=postback_obj.bot)
-
-        # facebook pixel lead event — отправляем если chat_id уже известен
+        logger.info(
+            "[%s] регистрация: новый пользователь uid=%s lid=%s",
+            platform, uid, lid,
+        )
+        send_postback(
+            {**data, "status": "reg", "uid": uid, "lid": lid},
+            bot_instance=postback_obj.bot,
+        )
         if postback_obj.chat_id and postback_obj.bot:
             _fire_lead_pixel(postback_obj)
     else:
-        logger.info("регистрация: uid=%s уже существует, пропускаем", uid)
+        logger.info(
+            "[%s] регистрация: uid=%s уже существует, пропускаем",
+            platform, uid,
+        )
 
 
-def _handle_deposit(uid: str, lid: str, params: dict):
+def _handle_deposit(uid: str, lid: str, data: dict, platform: str):
     """
     обрабатывает событие первого депозита (ftd).
-    обновляет запись постбэка суммой и флагом deposit=True.
-    автовыдача полного доступа происходит в bot/signals.py через post_save.
+    автовыдача доступа срабатывает через post_save сигнал в bot/signals.py.
     """
     try:
         postback_obj = Postback.objects.get(user_id=uid, link_id=lid)
     except Postback.DoesNotExist:
-        # постбэк о депозите пришёл раньше регистрации — создаём запись
         logger.warning(
-            "ftd без предварительной регистрации uid=%s lid=%s, создаём запись",
-            uid, lid,
+            "[%s] ftd без предварительной регистрации uid=%s lid=%s, создаём запись",
+            platform, uid, lid,
         )
         postback_obj = Postback.objects.create(
             user_id=uid, link_id=lid, chat_id=""
         )
     except Postback.MultipleObjectsReturned:
-        # берём первый из дубликатов
-        postback_obj = Postback.objects.filter(
-            user_id=uid, link_id=lid
-        ).first()
+        postback_obj = Postback.objects.filter(user_id=uid, link_id=lid).first()
 
-    # парсим сумму депозита
-    raw_payout = params.get("payout", params.get("amount", "0"))
-    deposit_amount = _parse_amount(raw_payout)
+    deposit_amount = _parse_amount(data.get("amount", "0"))
 
-    # обновляем данные депозита
     postback_obj.deposit = True
     postback_obj.deposit_amount = deposit_amount
     postback_obj.deposited_at = timezone.now()
     postback_obj.save()
 
     logger.info(
-        "депозит: uid=%s lid=%s сумма=%s", uid, lid, deposit_amount
+        "[%s] депозит: uid=%s lid=%s сумма=%s",
+        platform, uid, lid, deposit_amount,
     )
 
-    # уведомляем telegram-канал о депозите (передаём бота для фильтрации канала)
     send_postback(
-        {**params, "status": "ftd", "payout": str(deposit_amount or 0)},
+        {**data, "status": "ftd", "uid": uid, "lid": lid,
+         "payout": str(deposit_amount or 0)},
         bot_instance=postback_obj.bot,
     )
 
-    # facebook pixel purchase event
     if postback_obj.chat_id and postback_obj.bot and deposit_amount:
         _fire_purchase_pixel(postback_obj, deposit_amount)
 
+
+# =========================================================
+# вспомогательные функции
+# =========================================================
 
 def _parse_amount(raw_value: str):
     """безопасно конвертирует строку в Decimal. возвращает None при ошибке."""
@@ -137,7 +177,6 @@ def _parse_amount(raw_value: str):
 
 
 def _fire_lead_pixel(postback_obj: Postback):
-    """отправляет Lead-событие в facebook pixel для бота из постбэка."""
     try:
         if postback_obj.bot and postback_obj.bot.pixel_id:
             send_lead_event(postback_obj.bot, postback_obj.chat_id)
@@ -146,7 +185,6 @@ def _fire_lead_pixel(postback_obj: Postback):
 
 
 def _fire_purchase_pixel(postback_obj: Postback, amount: Decimal):
-    """отправляет Purchase-событие в facebook pixel для бота из постбэка."""
     try:
         if postback_obj.bot and postback_obj.bot.pixel_id:
             send_purchase_event(postback_obj.bot, postback_obj.chat_id, float(amount))

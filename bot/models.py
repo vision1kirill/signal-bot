@@ -10,9 +10,18 @@ LANGUAGE_CHOICES = [
 
 
 class Bot(models.Model):
+    PLATFORM_CHOICES = [
+        ("pocket", "Pocket Option"),
+        ("binarium", "Binarium (CleverAff)"),
+    ]
+
     name = models.CharField(max_length=100, verbose_name="Название")
     token = models.CharField(max_length=255, verbose_name="Токен")
     is_active = models.BooleanField(default=False, verbose_name="Активность")
+    platform = models.CharField(
+        max_length=32, choices=PLATFORM_CHOICES, default="pocket",
+        verbose_name="Платформа"
+    )
     # минимальный депозит для автовыдачи полного доступа
     min_deposit = models.DecimalField(
         max_digits=10, decimal_places=2, default=0,

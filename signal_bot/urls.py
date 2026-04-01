@@ -24,5 +24,9 @@ from crm import views
 urlpatterns = [
     path('admin/', admin.site.urls),
     *static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT),
+    # Pocket Option (оригинальный URL — обратная совместимость)
     path("postback/", views.postback_view, name="postback"),
+    # платформо-специфичные эндпоинты
+    path("postback/pocket/", views.postback_pocket_view, name="postback_pocket"),
+    path("postback/binarium/", views.postback_binarium_view, name="postback_binarium"),
 ]

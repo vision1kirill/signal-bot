@@ -154,13 +154,13 @@ class MessageAdmin(admin.ModelAdmin):
 @admin.register(Bot)
 class BotAdmin(admin.ModelAdmin):
     list_display = (
-        "name", "is_active", "min_deposit",
+        "name", "platform", "is_active", "min_deposit",
         "users_count", "temp_access_count", "bot_access_count",
         "pixel_configured",
     )
-    list_filter = ("is_active",)
+    list_filter = ("is_active", "platform")
     search_fields = ("name", "token")
-    fields = ("name", "token", "min_deposit", "ref_id", "pixel_id", "pixel_token")
+    fields = ("name", "token", "platform", "min_deposit", "ref_id", "pixel_id", "pixel_token")
     inlines = [
         ImageInline,
         MessageInline,
