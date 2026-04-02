@@ -752,14 +752,55 @@ def new_bot(bot_instance: Bot):
             )
         else:
             support_url = result_links.get("support", "https://t.me/")
-            buttons = [
-                [types.InlineKeyboardButton(text="💬 Поддержка", url=support_url)],
-                [types.InlineKeyboardButton(text="◀️ Назад", callback_data="menu")],
-            ]
-            keyboard = types.InlineKeyboardMarkup(buttons)
-            send_message_by_method(
-                message.chat.id, "get_user_id_error", language=lang, keyboard=keyboard
-            )
+
+            # для Binarium ID может ещё не появиться в системе CleverAff
+            # (их данные обновляются каждые ~3 минуты)
+            if bot_instance.platform == "binarium":
+                buttons = [
+                    [types.InlineKeyboardButton(
+                        text="🔄 Попробовать снова", callback_data="access"
+                    )],
+                    [types.InlineKeyboardButton(text="💬 Поддержка", url=support_url)],
+                    [types.InlineKeyboardButton(text="◀️ Назад", callback_data="menu")],
+                ]
+                keyboard = types.InlineKeyboardMarkup(buttons)
+                pending_texts = {
+                    "en": (
+                        "⏳ <b>Registration is being processed.</b>\n\n"
+                        "After registering on the platform, it takes up to <b>3 minutes</b> "
+                        "for your account to appear in the system.\n\n"
+                        "Please wait and tap <b>Try again</b>."
+                    ),
+                    "es": (
+                        "⏳ <b>El registro está siendo procesado.</b>\n\n"
+                        "Después de registrarte, puede tardar hasta <b>3 minutos</b> "
+                        "para que tu cuenta aparezca en el sistema.\n\n"
+                        "Por favor espera y presiona <b>Intentar de nuevo</b>."
+                    ),
+                    "pt": (
+                        "⏳ <b>O registro está sendo processado.</b>\n\n"
+                        "Após o cadastro, pode levar até <b>3 minutos</b> "
+                        "para que sua conta apareça no sistema.\n\n"
+                        "Por favor, aguarde e toque em <b>Tentar novamente</b>."
+                    ),
+                }
+                text = pending_texts.get(lang, pending_texts["en"])
+                try:
+                    bot.send_message(
+                        message.chat.id, text,
+                        parse_mode="HTML", reply_markup=keyboard,
+                    )
+                except Exception as e:
+                    logger.warning("не удалось отправить pending-сообщение: %s", e)
+            else:
+                buttons = [
+                    [types.InlineKeyboardButton(text="💬 Поддержка", url=support_url)],
+                    [types.InlineKeyboardButton(text="◀️ Назад", callback_data="menu")],
+                ]
+                keyboard = types.InlineKeyboardMarkup(buttons)
+                send_message_by_method(
+                    message.chat.id, "get_user_id_error", language=lang, keyboard=keyboard
+                )
 
     # =========================================================
     # получение сигнала — выбор рынка
