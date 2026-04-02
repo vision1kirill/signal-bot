@@ -362,25 +362,46 @@ def new_bot(bot_instance: Bot):
     bot.send_message_by_method = send_message_by_method
 
     # =========================================================
+    # вспомогательная функция — текст кнопки из БД
+    # =========================================================
+
+    def get_btn(method_key: str, lang: str, default: str) -> str:
+        """
+        Возвращает текст кнопки из модели Message (метод btn_*).
+        Если не задан в нужном языке — fallback на 'en', затем на default.
+        Редактируется в Admin → Бот → Сообщения, метод например 'btn_activate'.
+        """
+        text = (
+            Message.objects.filter(bot=bot_instance, method=method_key, language=lang)
+            .values_list("text", flat=True).first()
+            or Message.objects.filter(bot=bot_instance, method=method_key, language="en")
+            .values_list("text", flat=True).first()
+        )
+        return text or default
+
+    # =========================================================
     # вспомогательная функция — кнопки главного меню
     # =========================================================
 
-    def build_menu_keyboard(chat_id):
+    def build_menu_keyboard(chat_id, lang="en"):
         """строит клавиатуру главного меню в зависимости от статуса доступа."""
         buttons = []
         if BotAccess.objects.filter(bot=bot_instance, chat_id=str(chat_id)).exists():
             buttons.append([
                 types.InlineKeyboardButton(
-                    text="📊 Получить сигнал", callback_data="signal"
+                    text=get_btn("btn_signal", lang, "📊 Получить сигнал"),
+                    callback_data="signal",
                 )
             ])
         else:
             buttons += [
                 [types.InlineKeyboardButton(
-                    text="🚀 Активировать бота", callback_data="access"
+                    text=get_btn("btn_activate", lang, "🚀 Активировать бота"),
+                    callback_data="access",
                 )],
                 [types.InlineKeyboardButton(
-                    text="🆓 Бесплатный тест", callback_data="temp_access"
+                    text=get_btn("btn_free_test", lang, "🆓 Бесплатный тест"),
+                    callback_data="temp_access",
                 )],
             ]
 
@@ -389,11 +410,20 @@ def new_bot(bot_instance: Bot):
 
         buttons += [
             [
-                types.InlineKeyboardButton(text="⭐ Отзывы", url=reviews_url),
-                types.InlineKeyboardButton(text="💬 Поддержка", url=support_url),
+                types.InlineKeyboardButton(
+                    text=get_btn("btn_reviews", lang, "⭐ Отзывы"), url=reviews_url
+                ),
+                types.InlineKeyboardButton(
+                    text=get_btn("btn_support", lang, "💬 Поддержка"), url=support_url
+                ),
             ],
-            [types.InlineKeyboardButton(text="ℹ️ О нас", callback_data="about")],
-            [types.InlineKeyboardButton(text="🌍 Язык / Language", callback_data="language")],
+            [types.InlineKeyboardButton(
+                text=get_btn("btn_about", lang, "ℹ️ О нас"), callback_data="about"
+            )],
+            [types.InlineKeyboardButton(
+                text=get_btn("btn_language", lang, "🌍 Язык / Language"),
+                callback_data="language",
+            )],
         ]
         return types.InlineKeyboardMarkup(buttons)
 
@@ -433,7 +463,10 @@ def new_bot(bot_instance: Bot):
 
         lang = user_obj.language
         keyboard = types.InlineKeyboardMarkup([[
-            types.InlineKeyboardButton(text="▶️ Запустить бота", callback_data="menu")
+            types.InlineKeyboardButton(
+                text=get_btn("btn_start", lang, "▶️ Запустить бота"),
+                callback_data="menu",
+            )
         ]])
         send_message_by_method(chat_id, "hello", language=lang, keyboard=keyboard)
 
@@ -491,7 +524,7 @@ def new_bot(bot_instance: Bot):
     def menu(call):
         bot.clear_step_handler(call.message)
         lang = get_user_language(bot_instance, call.message.chat.id)
-        keyboard = build_menu_keyboard(call.message.chat.id)
+        keyboard = build_menu_keyboard(call.message.chat.id, lang)
         send_message_by_method(
             call.message.chat.id, "menu", language=lang,
             edit=True, message_id=call.message.message_id, keyboard=keyboard
@@ -589,7 +622,7 @@ def new_bot(bot_instance: Bot):
             pass
 
         # возвращаемся в меню с новым языком
-        keyboard = build_menu_keyboard(call.message.chat.id)
+        keyboard = build_menu_keyboard(call.message.chat.id, lang_code)
         lang_result = result.get(lang_code) or result.get("en") or {}
         menu_data = lang_result.get("menu")
         if menu_data:
@@ -758,40 +791,58 @@ def new_bot(bot_instance: Bot):
             if bot_instance.platform == "binarium":
                 buttons = [
                     [types.InlineKeyboardButton(
-                        text="🔄 Попробовать снова", callback_data="access"
+                        text=get_btn("btn_retry", lang, "🔄 Попробовать снова"),
+                        callback_data="access",
                     )],
-                    [types.InlineKeyboardButton(text="💬 Поддержка", url=support_url)],
-                    [types.InlineKeyboardButton(text="◀️ Назад", callback_data="menu")],
+                    [types.InlineKeyboardButton(
+                        text=get_btn("btn_support", lang, "💬 Поддержка"),
+                        url=support_url,
+                    )],
+                    [types.InlineKeyboardButton(
+                        text=get_btn("btn_back", lang, "◀️ Назад"),
+                        callback_data="menu",
+                    )],
                 ]
                 keyboard = types.InlineKeyboardMarkup(buttons)
-                pending_texts = {
-                    "en": (
-                        "⏳ <b>Registration is being processed.</b>\n\n"
-                        "After registering on the platform, it takes up to <b>3 minutes</b> "
-                        "for your account to appear in the system.\n\n"
-                        "Please wait and tap <b>Try again</b>."
-                    ),
-                    "es": (
-                        "⏳ <b>El registro está siendo procesado.</b>\n\n"
-                        "Después de registrarte, puede tardar hasta <b>3 minutos</b> "
-                        "para que tu cuenta aparezca en el sistema.\n\n"
-                        "Por favor espera y presiona <b>Intentar de nuevo</b>."
-                    ),
-                    "pt": (
-                        "⏳ <b>O registro está sendo processado.</b>\n\n"
-                        "Após o cadastro, pode levar até <b>3 minutos</b> "
-                        "para que sua conta apareça no sistema.\n\n"
-                        "Por favor, aguarde e toque em <b>Tentar novamente</b>."
-                    ),
-                }
-                text = pending_texts.get(lang, pending_texts["en"])
-                try:
-                    bot.send_message(
-                        message.chat.id, text,
-                        parse_mode="HTML", reply_markup=keyboard,
+
+                # если в БД настроено сообщение get_user_id_pending — используем его
+                # иначе — встроенный текст (пока не добавлен в админке)
+                if Message.objects.filter(
+                    bot=bot_instance, method="get_user_id_pending"
+                ).exists():
+                    send_message_by_method(
+                        message.chat.id, "get_user_id_pending",
+                        language=lang, keyboard=keyboard,
                     )
-                except Exception as e:
-                    logger.warning("не удалось отправить pending-сообщение: %s", e)
+                else:
+                    _pending_texts = {
+                        "en": (
+                            "⏳ <b>Registration is being processed.</b>\n\n"
+                            "After registering on the platform, it takes up to <b>3 minutes</b> "
+                            "for your account to appear in the system.\n\n"
+                            "Please wait and tap <b>Try again</b>."
+                        ),
+                        "es": (
+                            "⏳ <b>El registro está siendo procesado.</b>\n\n"
+                            "Después de registrarte, puede tardar hasta <b>3 minutos</b> "
+                            "para que tu cuenta aparezca en el sistema.\n\n"
+                            "Por favor espera y presiona <b>Intentar de nuevo</b>."
+                        ),
+                        "pt": (
+                            "⏳ <b>O registro está sendo processado.</b>\n\n"
+                            "Após o cadastro, pode levar até <b>3 minutos</b> "
+                            "para que sua conta apareça no sistema.\n\n"
+                            "Por favor, aguarde e toque em <b>Tentar novamente</b>."
+                        ),
+                    }
+                    try:
+                        bot.send_message(
+                            message.chat.id,
+                            _pending_texts.get(lang, _pending_texts["en"]),
+                            parse_mode="HTML", reply_markup=keyboard,
+                        )
+                    except Exception as e:
+                        logger.warning("не удалось отправить pending-сообщение: %s", e)
             else:
                 buttons = [
                     [types.InlineKeyboardButton(text="💬 Поддержка", url=support_url)],
@@ -1150,7 +1201,7 @@ def new_bot(bot_instance: Bot):
 
         # bug-fix: нет никакого доступа — перенаправляем в меню с объяснением
         lang = get_user_language(bot_instance, chat_id)
-        keyboard = build_menu_keyboard(chat_id)
+        keyboard = build_menu_keyboard(chat_id, lang)
         try:
             send_message_by_method(
                 chat_id, "menu", language=lang,
