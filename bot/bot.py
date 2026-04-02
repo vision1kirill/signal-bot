@@ -13,14 +13,86 @@ from telebot.apihelper import ApiException
 from django.utils import timezone
 from datetime import timedelta
 
+from decimal import Decimal
+
 from .models import (
     Bot, Message, Link, BotAccess, Postback,
     TempAccess, User, MultiChat, CustomSignal, Channel
 )
 from crm.models import Market, Pair, Expiration
 from .pixel import send_lead_event  # для события привязки платформенного id
+from .cleveraff_api import check_gamer  # API CleverAff для Binarium
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_postback(bot_instance: Bot, entered_id: str, lid: str) -> "Postback | None":
+    """
+    Находит или создаёт Postback для пользователя.
+
+    Для Binarium (если заданы api_partner_id и api_key):
+        — вызывает CleverAff API мгновенно, без ожидания постбэка.
+        — если API вернул 404 → пользователь не наш → None.
+        — если API недоступен → fallback на локальную БД.
+
+    Для Pocket и остальных платформ:
+        — ищет в локальной БД (стандартная логика).
+
+    Возвращает объект Postback (ещё не привязан к chat_id) или None.
+    """
+    if (
+        bot_instance.platform == "binarium"
+        and bot_instance.api_partner_id
+        and bot_instance.api_key
+    ):
+        api_data = check_gamer(
+            entered_id,
+            partner_id=bot_instance.api_partner_id,
+            api_key=bot_instance.api_key,
+        )
+
+        if api_data is not None:
+            # игрок наш — берём существующий постбэк или создаём новый
+            postback_obj = (
+                Postback.objects.filter(user_id=entered_id, chat_id="").first()
+                or Postback.objects.create(
+                    user_id=entered_id,
+                    link_id=lid or "",
+                    chat_id="",
+                    bot=bot_instance,
+                )
+            )
+
+            # если API уже знает о депозите — фиксируем его сразу
+            if api_data.get("dep") and not postback_obj.deposit:
+                stats = api_data.get("stats") or {}
+                ftd_amount = stats.get("ftd_amount")
+                postback_obj.deposit = True
+                postback_obj.deposit_amount = (
+                    Decimal(str(ftd_amount)) if ftd_amount is not None else None
+                )
+                postback_obj.deposited_at = timezone.now()
+
+            return postback_obj
+
+        # API вернул 404 или временная ошибка
+        # при 404 — пользователь точно не наш, нет смысла искать в БД
+        # при ошибке — пробуем БД как запасной вариант
+        logger.warning(
+            "CleverAff API не нашёл uid=%s, проверяем локальную БД", entered_id
+        )
+
+    # стандартный поиск по локальной БД (Pocket + fallback для Binarium)
+    postback_obj = None
+    if lid:
+        postback_obj = Postback.objects.filter(
+            user_id=entered_id, chat_id="", link_id=lid
+        ).first()
+    if not postback_obj:
+        postback_obj = Postback.objects.filter(
+            user_id=entered_id, chat_id=""
+        ).first()
+    return postback_obj
 
 # карта языковых кодов telegram → коды языков бота
 LANG_MAP = {
@@ -648,16 +720,8 @@ def new_bot(bot_instance: Bot):
             )
             return
 
-        # ищем незаявленный постбэк: сначала с точным lid, потом без него
-        postback_obj = None
-        if lid:
-            postback_obj = Postback.objects.filter(
-                user_id=entered_id, chat_id="", link_id=lid
-            ).first()
-        if not postback_obj:
-            postback_obj = Postback.objects.filter(
-                user_id=entered_id, chat_id=""
-            ).first()
+        # ищем постбэк: Binarium — через API, остальные — через БД
+        postback_obj = _resolve_postback(bot_instance, entered_id, lid)
 
         if postback_obj:
             postback_obj.chat_id = str(message.chat.id)

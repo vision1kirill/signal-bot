@@ -33,6 +33,16 @@ class Bot(models.Model):
         max_length=100, blank=True, default="",
         verbose_name="ID реферальной ссылки (lid / aff_id)"
     )
+    # CleverAff API (Binarium) — для мгновенной проверки без ожидания постбэка
+    api_partner_id = models.CharField(
+        max_length=50, blank=True, default="",
+        verbose_name="API Partner ID (CleverAff)"
+    )
+    api_key = models.CharField(
+        max_length=200, blank=True, default="",
+        verbose_name="API Key (CleverAff)"
+    )
+
     # facebook pixel — server-side conversions api
     pixel_id = models.CharField(
         max_length=100, blank=True, default="",

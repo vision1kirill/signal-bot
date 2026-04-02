@@ -160,7 +160,11 @@ class BotAdmin(admin.ModelAdmin):
     )
     list_filter = ("is_active", "platform")
     search_fields = ("name", "token")
-    fields = ("name", "token", "platform", "min_deposit", "ref_id", "pixel_id", "pixel_token")
+    fields = (
+        "name", "token", "platform", "min_deposit", "ref_id",
+        "api_partner_id", "api_key",
+        "pixel_id", "pixel_token",
+    )
     inlines = [
         ImageInline,
         MessageInline,
