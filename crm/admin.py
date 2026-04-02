@@ -22,6 +22,54 @@ logger = logging.getLogger(__name__)
 
 
 # =========================================================
+# дефолтные тексты кнопок (синхронизированы с bot/bot.py get_btn defaults)
+# =========================================================
+
+_DEFAULT_BUTTON_MESSAGES = {
+    "btn_start":    {"en": "▶️ Start Bot",        "es": "▶️ Iniciar Bot",          "pt": "▶️ Iniciar Bot"},
+    "btn_activate": {"en": "🚀 Activate Bot",      "es": "🚀 Activar Bot",           "pt": "🚀 Ativar Bot"},
+    "btn_free_test":{"en": "🆓 Free Test",         "es": "🆓 Prueba Gratis",         "pt": "🆓 Teste Grátis"},
+    "btn_signal":   {"en": "📊 Get Signal",        "es": "📊 Obtener Señal",         "pt": "📊 Obter Sinal"},
+    "btn_reviews":  {"en": "⭐ Reviews",           "es": "⭐ Reseñas",               "pt": "⭐ Avaliações"},
+    "btn_support":  {"en": "💬 Support",           "es": "💬 Soporte",               "pt": "💬 Suporte"},
+    "btn_about":    {"en": "ℹ️ About Us",          "es": "ℹ️ Sobre Nosotros",        "pt": "ℹ️ Sobre Nós"},
+    "btn_language": {"en": "🌍 Language",          "es": "🌍 Idioma",                "pt": "🌍 Idioma"},
+    "btn_back":     {"en": "◀️ Back",              "es": "◀️ Atrás",                 "pt": "◀️ Voltar"},
+    "btn_retry":    {"en": "🔄 Try Again",         "es": "🔄 Intentar de Nuevo",     "pt": "🔄 Tentar Novamente"},
+    "get_user_id_pending": {
+        "en": (
+            "⏳ <b>Registration is being processed.</b>\n\n"
+            "After registering on the platform, it takes up to <b>3 minutes</b> "
+            "for your account to appear in the system.\n\n"
+            "Please wait and tap <b>Try Again</b>."
+        ),
+        "es": (
+            "⏳ <b>El registro está siendo procesado.</b>\n\n"
+            "Después de registrarte, puede tardar hasta <b>3 minutos</b> "
+            "para que tu cuenta aparezca en el sistema.\n\n"
+            "Por favor espera y presiona <b>Intentar de Nuevo</b>."
+        ),
+        "pt": (
+            "⏳ <b>O registro está sendo processado.</b>\n\n"
+            "Após o cadastro, pode levar até <b>3 minutos</b> "
+            "para que sua conta apareça no sistema.\n\n"
+            "Por favor, aguarde e toque em <b>Tentar Novamente</b>."
+        ),
+    },
+}
+
+
+def _create_default_button_messages(bot_obj):
+    """создаёт дефолтные записи кнопок для бота если их ещё нет."""
+    for method, translations in _DEFAULT_BUTTON_MESSAGES.items():
+        for language, text in translations.items():
+            Message.objects.get_or_create(
+                bot=bot_obj, method=method, language=language,
+                defaults={"text": text},
+            )
+
+
+# =========================================================
 # inline-классы для вложенного редактирования
 # =========================================================
 
@@ -249,6 +297,14 @@ class BotAdmin(admin.ModelAdmin):
                 )
 
         self.message_user(request, f"Скопировано ботов: {queryset.count()}")
+
+    # --- создаём дефолтные записи кнопок при сохранении нового бота ---
+
+    def save_model(self, request, obj, form, change):
+        super().save_model(request, obj, form, change)
+        if not change:
+            # новый бот — создаём дефолтные сообщения для кнопок
+            _create_default_button_messages(obj)
 
     # --- скрываем инлайны при создании нового бота ---
 
