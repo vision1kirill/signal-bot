@@ -34,8 +34,13 @@ _DEFAULT_BUTTON_MESSAGES = {
     "btn_support":  {"en": "💬 Support",           "es": "💬 Soporte",               "pt": "💬 Suporte"},
     "btn_about":    {"en": "ℹ️ About Us",          "es": "ℹ️ Sobre Nosotros",        "pt": "ℹ️ Sobre Nós"},
     "btn_language": {"en": "🌍 Language",          "es": "🌍 Idioma",                "pt": "🌍 Idioma"},
-    "btn_back":     {"en": "◀️ Back",              "es": "◀️ Atrás",                 "pt": "◀️ Voltar"},
-    "btn_retry":    {"en": "🔄 Try Again",         "es": "🔄 Intentar de Nuevo",     "pt": "🔄 Tentar Novamente"},
+    "btn_back":          {"en": "◀️ Back",              "es": "◀️ Atrás",                  "pt": "◀️ Voltar"},
+    "btn_retry":         {"en": "🔄 Try Again",         "es": "🔄 Intentar de Nuevo",      "pt": "🔄 Tentar Novamente"},
+    "btn_register":      {"en": "📝 Register",           "es": "📝 Registrarse",             "pt": "📝 Registrar"},
+    "btn_check_reg":     {"en": "✅ Check Registration", "es": "✅ Verificar Registro",      "pt": "✅ Verificar Cadastro"},
+    "btn_activate_test": {"en": "▶️ Activate Free Test", "es": "▶️ Activar Prueba Gratis",  "pt": "▶️ Ativar Teste Grátis"},
+    "btn_new_signal":    {"en": "🔄 New Signal",         "es": "🔄 Nueva Señal",             "pt": "🔄 Novo Sinal"},
+    "btn_menu":          {"en": "🏠 Menu",               "es": "🏠 Menú",                    "pt": "🏠 Menu"},
     "get_user_id_pending": {
         "en": (
             "⏳ <b>Registration is being processed.</b>\n\n"

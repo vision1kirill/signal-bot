@@ -1,4 +1,22 @@
+"""
+конфигурация приложения bot.
+при старте сервера автоматически запускает все боты с is_active=True.
+"""
+
+import sys
+import logging
+import threading
+
 from django.apps import AppConfig
+
+logger = logging.getLogger(__name__)
+
+# manage.py команды при которых боты не нужны
+_SKIP_AUTOSTART_COMMANDS = {
+    "migrate", "makemigrations", "shell", "shell_plus",
+    "test", "collectstatic", "createsuperuser", "check",
+    "showmigrations", "sqlmigrate", "dbshell", "dumpdata", "loaddata",
+}
 
 
 class BotConfig(AppConfig):
@@ -6,24 +24,42 @@ class BotConfig(AppConfig):
     name = "bot"
 
     def ready(self):
-        import bot.signals  # регистрируем сигналы django
+        import bot.signals  # регистрируем django-сигналы
 
-        from django.core.signals import request_started
-        from .models import Bot
+        # пропускаем авто-старт при выполнении manage.py команд
+        argv = sys.argv
+        if len(argv) > 1 and argv[1] in _SKIP_AUTOSTART_COMMANDS:
+            return
 
-        def reset_bots(sender, **kwargs):
-            """
-            сбрасываем флаг is_active для всех ботов при первом запросе.
-            это нужно потому что треды не переживают перезапуск сервера —
-            боты в памяти пропадают, а в бд остаётся is_active=True.
-            """
-            if getattr(reset_bots, "done", False):
+        # небольшая задержка чтобы Django и пул соединений с БД
+        # полностью инициализировались перед первым ORM-запросом
+        timer = threading.Timer(2.0, self._autostart_bots)
+        timer.daemon = True
+        timer.start()
+
+    def _autostart_bots(self):
+        """Запускает все боты у которых is_active=True в БД."""
+        try:
+            from .models import Bot
+            from .utils import start_bot, active_bots
+
+            bots = list(Bot.objects.filter(is_active=True))
+            if not bots:
+                logger.info("авто-старт: активных ботов не найдено")
                 return
-            reset_bots.done = True
-            try:
-                # таблица может не существовать при первой миграции
-                Bot.objects.all().update(is_active=False)
-            except Exception:
-                pass  # db ещё не готова — пропускаем
 
-        request_started.connect(reset_bots)
+            for bot_obj in bots:
+                # не запускаем повторно если бот уже в памяти
+                if bot_obj.id in active_bots:
+                    continue
+                try:
+                    start_bot(bot_obj)
+                    logger.info("авто-старт: бот '%s' запущен", bot_obj.name)
+                except Exception as e:
+                    logger.error(
+                        "авто-старт: не удалось запустить бота '%s': %s",
+                        bot_obj.name, e,
+                    )
+
+        except Exception as e:
+            logger.error("авто-старт: ошибка: %s", e)

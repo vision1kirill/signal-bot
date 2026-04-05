@@ -21,7 +21,7 @@ from .models import (
 )
 from crm.models import Market, Pair, Expiration
 from .pixel import send_lead_event  # для события привязки платформенного id
-from .cleveraff_api import check_gamer  # API CleverAff для Binarium
+from .cleveraff_api import check_gamer, PLAYER_NOT_FOUND  # API CleverAff для Binarium
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +51,11 @@ def _resolve_postback(bot_instance: Bot, entered_id: str, lid: str) -> "Postback
             api_key=bot_instance.api_key,
         )
 
+        if api_data is PLAYER_NOT_FOUND:
+            # HTTP 404 — игрок точно не наш, не смотрим в локальную БД
+            logger.info("_resolve_postback: uid=%s не наш (404 от CleverAff)", entered_id)
+            return None
+
         if api_data is not None:
             # игрок наш — берём существующий постбэк или создаём новый
             postback_obj = (
@@ -75,11 +80,11 @@ def _resolve_postback(bot_instance: Bot, entered_id: str, lid: str) -> "Postback
 
             return postback_obj
 
-        # API вернул 404 или временная ошибка
-        # при 404 — пользователь точно не наш, нет смысла искать в БД
-        # при ошибке — пробуем БД как запасной вариант
+        # api_data is None — временная ошибка API (timeout, 5xx)
+        # пробуем локальную БД как запасной вариант
         logger.warning(
-            "CleverAff API не нашёл uid=%s, проверяем локальную БД", entered_id
+            "CleverAff API временно недоступен для uid=%s, проверяем локальную БД",
+            entered_id,
         )
 
     # стандартный поиск по локальной БД (Pocket + fallback для Binarium)
@@ -93,6 +98,21 @@ def _resolve_postback(bot_instance: Bot, entered_id: str, lid: str) -> "Postback
             user_id=entered_id, chat_id=""
         ).first()
     return postback_obj
+
+def _get_btn(bot_instance: "Bot", method_key: str, lang: str, default: str) -> str:
+    """
+    Возвращает текст кнопки из модели Message (метод btn_*).
+    Если не задан в нужном языке — fallback на 'en', затем на default.
+    Можно использовать как внутри new_bot(), так и снаружи.
+    """
+    text = (
+        Message.objects.filter(bot=bot_instance, method=method_key, language=lang)
+        .values_list("text", flat=True).first()
+        or Message.objects.filter(bot=bot_instance, method=method_key, language="en")
+        .values_list("text", flat=True).first()
+    )
+    return text or default
+
 
 # карта языковых кодов telegram → коды языков бота
 LANG_MAP = {
@@ -366,18 +386,8 @@ def new_bot(bot_instance: Bot):
     # =========================================================
 
     def get_btn(method_key: str, lang: str, default: str) -> str:
-        """
-        Возвращает текст кнопки из модели Message (метод btn_*).
-        Если не задан в нужном языке — fallback на 'en', затем на default.
-        Редактируется в Admin → Бот → Сообщения, метод например 'btn_activate'.
-        """
-        text = (
-            Message.objects.filter(bot=bot_instance, method=method_key, language=lang)
-            .values_list("text", flat=True).first()
-            or Message.objects.filter(bot=bot_instance, method=method_key, language="en")
-            .values_list("text", flat=True).first()
-        )
-        return text or default
+        """Тонкая обёртка над модульной _get_btn с захваченным bot_instance."""
+        return _get_btn(bot_instance, method_key, lang, default)
 
     # =========================================================
     # вспомогательная функция — кнопки главного меню
@@ -556,7 +566,9 @@ def new_bot(bot_instance: Bot):
                 ),
                 types.InlineKeyboardButton(text="▶", callback_data=f"about_{next_page}"),
             ],
-            [types.InlineKeyboardButton(text="◀️ Назад", callback_data="menu")],
+            [types.InlineKeyboardButton(
+                text=get_btn("btn_back", lang, "◀️ Назад"), callback_data="menu"
+            )],
         ]
         keyboard = types.InlineKeyboardMarkup(buttons)
         send_message_by_method(
@@ -571,6 +583,7 @@ def new_bot(bot_instance: Bot):
     @bot.callback_query_handler(func=lambda call: call.data == "language")
     def language_menu(call):
         """показывает меню выбора языка."""
+        lang = get_user_language(bot_instance, call.message.chat.id)
         buttons = [
             [types.InlineKeyboardButton(
                 text=label, callback_data=f"set_lang_{code}"
@@ -578,7 +591,9 @@ def new_bot(bot_instance: Bot):
             for code, label in LANG_LABELS.items()
         ]
         buttons.append([
-            types.InlineKeyboardButton(text="◀️ Назад", callback_data="menu")
+            types.InlineKeyboardButton(
+                text=get_btn("btn_back", lang, "◀️ Назад"), callback_data="menu"
+            )
         ])
         keyboard = types.InlineKeyboardMarkup(buttons)
         lang_text = "🌍 Choose your language / Elige tu idioma / Escolha seu idioma:"
@@ -668,12 +683,16 @@ def new_bot(bot_instance: Bot):
             ref_url = result_links.get("ref", "https://t.me/")
             buttons = [
                 [types.InlineKeyboardButton(
-                    text="📝 Зарегистрироваться", url=ref_url
+                    text=get_btn("btn_register", lang, "📝 Зарегистрироваться"),
+                    url=ref_url,
                 )],
                 [types.InlineKeyboardButton(
-                    text="✅ Проверить регистрацию", callback_data="get_user_id"
+                    text=get_btn("btn_check_reg", lang, "✅ Проверить регистрацию"),
+                    callback_data="get_user_id",
                 )],
-                [types.InlineKeyboardButton(text="◀️ Назад", callback_data="menu")],
+                [types.InlineKeyboardButton(
+                    text=get_btn("btn_back", lang, "◀️ Назад"), callback_data="menu"
+                )],
             ]
             keyboard = types.InlineKeyboardMarkup(buttons)
             send_message_by_method(
@@ -685,9 +704,11 @@ def new_bot(bot_instance: Bot):
             support_url = result_links.get("support", "https://t.me/")
             buttons = [
                 [types.InlineKeyboardButton(
-                    text="💬 Поддержка", url=support_url
+                    text=get_btn("btn_support", lang, "💬 Поддержка"), url=support_url
                 )],
-                [types.InlineKeyboardButton(text="◀️ Назад", callback_data="menu")],
+                [types.InlineKeyboardButton(
+                    text=get_btn("btn_back", lang, "◀️ Назад"), callback_data="menu"
+                )],
             ]
             keyboard = types.InlineKeyboardMarkup(buttons)
             send_message_by_method(
@@ -709,8 +730,12 @@ def new_bot(bot_instance: Bot):
         lang = get_user_language(bot_instance, call.message.chat.id)
         support_url = result_links.get("support", "https://t.me/")
         buttons = [
-            [types.InlineKeyboardButton(text="💬 Поддержка", url=support_url)],
-            [types.InlineKeyboardButton(text="◀️ Назад", callback_data="menu")],
+            [types.InlineKeyboardButton(
+                text=get_btn("btn_support", lang, "💬 Поддержка"), url=support_url
+            )],
+            [types.InlineKeyboardButton(
+                text=get_btn("btn_back", lang, "◀️ Назад"), callback_data="menu"
+            )],
         ]
         keyboard = types.InlineKeyboardMarkup(buttons)
         send_message_by_method(
@@ -744,8 +769,12 @@ def new_bot(bot_instance: Bot):
         if already_claimed:
             # этот platform id уже привязан к другому telegram-аккаунту
             buttons = [
-                [types.InlineKeyboardButton(text="💬 Поддержка", url=support_url)],
-                [types.InlineKeyboardButton(text="◀️ Назад", callback_data="menu")],
+                [types.InlineKeyboardButton(
+                    text=get_btn("btn_support", lang, "💬 Поддержка"), url=support_url
+                )],
+                [types.InlineKeyboardButton(
+                    text=get_btn("btn_back", lang, "◀️ Назад"), callback_data="menu"
+                )],
             ]
             keyboard = types.InlineKeyboardMarkup(buttons)
             send_message_by_method(
@@ -776,8 +805,12 @@ def new_bot(bot_instance: Bot):
 
             support_url = result_links.get("support", "https://t.me/")
             buttons = [
-                [types.InlineKeyboardButton(text="💬 Поддержка", url=support_url)],
-                [types.InlineKeyboardButton(text="◀️ Назад", callback_data="menu")],
+                [types.InlineKeyboardButton(
+                    text=get_btn("btn_support", lang, "💬 Поддержка"), url=support_url
+                )],
+                [types.InlineKeyboardButton(
+                    text=get_btn("btn_back", lang, "◀️ Назад"), callback_data="menu"
+                )],
             ]
             keyboard = types.InlineKeyboardMarkup(buttons)
             send_message_by_method(
@@ -845,8 +878,13 @@ def new_bot(bot_instance: Bot):
                         logger.warning("не удалось отправить pending-сообщение: %s", e)
             else:
                 buttons = [
-                    [types.InlineKeyboardButton(text="💬 Поддержка", url=support_url)],
-                    [types.InlineKeyboardButton(text="◀️ Назад", callback_data="menu")],
+                    [types.InlineKeyboardButton(
+                        text=get_btn("btn_support", lang, "💬 Поддержка"),
+                        url=support_url,
+                    )],
+                    [types.InlineKeyboardButton(
+                        text=get_btn("btn_back", lang, "◀️ Назад"), callback_data="menu"
+                    )],
                 ]
                 keyboard = types.InlineKeyboardMarkup(buttons)
                 send_message_by_method(
@@ -879,7 +917,7 @@ def new_bot(bot_instance: Bot):
             count += 1
 
         buttons.append([types.InlineKeyboardButton(
-            text="◀️ Назад", callback_data="menu"
+            text=get_btn("btn_back", lang, "◀️ Назад"), callback_data="menu"
         )])
         keyboard = types.InlineKeyboardMarkup(buttons)
         send_message_by_method(
@@ -949,7 +987,9 @@ def new_bot(bot_instance: Bot):
                 ),
                 types.InlineKeyboardButton(text="▶", callback_data=next_cb),
             ],
-            [types.InlineKeyboardButton(text="◀️ Назад", callback_data="signal")],
+            [types.InlineKeyboardButton(
+                text=get_btn("btn_back", lang, "◀️ Назад"), callback_data="signal"
+            )],
         ]
         keyboard = types.InlineKeyboardMarkup(buttons)
         send_message_by_method(
@@ -984,7 +1024,7 @@ def new_bot(bot_instance: Bot):
             count += 1
 
         buttons.append([types.InlineKeyboardButton(
-            text="◀️ Назад", callback_data="signal"
+            text=get_btn("btn_back", lang, "◀️ Назад"), callback_data="signal"
         )])
         keyboard = types.InlineKeyboardMarkup(buttons)
         send_message_by_method(
@@ -1029,13 +1069,18 @@ def new_bot(bot_instance: Bot):
         if has_full_access:
             buttons = [
                 [types.InlineKeyboardButton(
-                    text="🔄 Новый сигнал", callback_data="signal"
+                    text=get_btn("btn_new_signal", lang, "🔄 Новый сигнал"),
+                    callback_data="signal",
                 )],
-                [types.InlineKeyboardButton(text="🏠 Меню", callback_data="menu")],
+                [types.InlineKeyboardButton(
+                    text=get_btn("btn_menu", lang, "🏠 Меню"), callback_data="menu"
+                )],
             ]
         else:
             buttons = [
-                [types.InlineKeyboardButton(text="🏠 Меню", callback_data="menu")]
+                [types.InlineKeyboardButton(
+                    text=get_btn("btn_menu", lang, "🏠 Меню"), callback_data="menu"
+                )]
             ]
         keyboard = types.InlineKeyboardMarkup(buttons)
 
@@ -1063,10 +1108,11 @@ def new_bot(bot_instance: Bot):
                 # тест истёк
                 buttons = [
                     [types.InlineKeyboardButton(
-                        text="🚀 Активировать бота", callback_data="access"
+                        text=get_btn("btn_activate", lang, "🚀 Активировать бота"),
+                        callback_data="access",
                     )],
                     [types.InlineKeyboardButton(
-                        text="◀️ Назад", callback_data="menu"
+                        text=get_btn("btn_back", lang, "◀️ Назад"), callback_data="menu"
                     )],
                 ]
                 keyboard = types.InlineKeyboardMarkup(buttons)
@@ -1079,10 +1125,11 @@ def new_bot(bot_instance: Bot):
                 remaining = 10 - int(elapsed.total_seconds() / 60)
                 buttons = [
                     [types.InlineKeyboardButton(
-                        text="📊 Получить сигнал", callback_data="signal"
+                        text=get_btn("btn_signal", lang, "📊 Получить сигнал"),
+                        callback_data="signal",
                     )],
                     [types.InlineKeyboardButton(
-                        text="◀️ Назад", callback_data="menu"
+                        text=get_btn("btn_back", lang, "◀️ Назад"), callback_data="menu"
                     )],
                 ]
                 keyboard = types.InlineKeyboardMarkup(buttons)
@@ -1094,10 +1141,11 @@ def new_bot(bot_instance: Bot):
             # тест ещё не активировался
             buttons = [
                 [types.InlineKeyboardButton(
-                    text="▶️ Активировать тест", callback_data="temp_access_activate"
+                    text=get_btn("btn_activate_test", lang, "▶️ Активировать тест"),
+                    callback_data="temp_access_activate",
                 )],
                 [types.InlineKeyboardButton(
-                    text="◀️ Назад", callback_data="menu"
+                    text=get_btn("btn_back", lang, "◀️ Назад"), callback_data="menu"
                 )],
             ]
             keyboard = types.InlineKeyboardMarkup(buttons)
@@ -1122,9 +1170,12 @@ def new_bot(bot_instance: Bot):
 
         buttons = [
             [types.InlineKeyboardButton(
-                text="📊 Получить сигнал", callback_data="signal"
+                text=get_btn("btn_signal", lang, "📊 Получить сигнал"),
+                callback_data="signal",
             )],
-            [types.InlineKeyboardButton(text="◀️ Назад", callback_data="menu")],
+            [types.InlineKeyboardButton(
+                text=get_btn("btn_back", lang, "◀️ Назад"), callback_data="menu"
+            )],
         ]
         keyboard = types.InlineKeyboardMarkup(buttons)
         send_message_by_method(
@@ -1183,9 +1234,12 @@ def new_bot(bot_instance: Bot):
             lang = get_user_language(bot_instance, chat_id)
             buttons = [
                 [types.InlineKeyboardButton(
-                    text="🚀 Активировать бота", callback_data="access"
+                    text=get_btn("btn_activate", lang, "🚀 Активировать бота"),
+                    callback_data="access",
                 )],
-                [types.InlineKeyboardButton(text="🏠 Меню", callback_data="menu")],
+                [types.InlineKeyboardButton(
+                    text=get_btn("btn_menu", lang, "🏠 Меню"), callback_data="menu"
+                )],
             ]
             keyboard = types.InlineKeyboardMarkup(buttons)
             try:
@@ -1258,7 +1312,10 @@ def send_access_message(bot, chat_id):
             logger.warning("не удалось отправить в feed о полном доступе: %s", e)
 
     lang = get_user_language(bot.bot_instance, chat_id)
-    buttons = [[types.InlineKeyboardButton(text="🏠 Меню", callback_data="menu")]]
+    buttons = [[types.InlineKeyboardButton(
+        text=_get_btn(bot.bot_instance, "btn_menu", lang, "🏠 Меню"),
+        callback_data="menu",
+    )]]
     keyboard = types.InlineKeyboardMarkup(buttons)
     bot.send_message_by_method(chat_id, "new_access", language=lang, keyboard=keyboard)
 
