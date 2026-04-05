@@ -114,6 +114,119 @@ def _get_btn(bot_instance: "Bot", method_key: str, lang: str, default: str) -> s
     return text or default
 
 
+# =========================================================
+# переводы текста сигнала по языкам
+# =========================================================
+
+_SIGNAL_I18N = {
+    "en": {
+        "demo_label":        "⚠️ <i>Demo mode. Signals are not accurate</i>",
+        "locked":            "🔐 Locked",
+        "higher":            "🟢 HIGHER",
+        "lower":             "🔴 LOWER",
+        "overview":          "🔍 Overview",
+        "price_levels":      "📐 Price Levels",
+        "indicators":        "📊 Indicators",
+        "signal_strength":   "✅ Signal Strength",
+        "volatility":        "Volatility",
+        "asset_strength":    "Asset Strength",
+        "volume":            "Volume",
+        "sentiment":         "Sentiment",
+        "price":             "Price",
+        "resistance":        "Resistance (R1)",
+        "support":           "Support (S1)",
+        "rsi":               "RSI",
+        "macd":              "MACD",
+        "ma":                "MA",
+        "strength":          "Strength",
+        "conditions":        "Conditions",
+        "expiration":        "Expiration",
+        "direction":         "Direction",
+        "volatility_options": ["Low", "Medium", "High", "Above average", "Extreme"],
+        "sentiment_options":  ["Strong bullish", "Bullish", "Neutral",
+                               "Bearish", "Strong bearish",
+                               "Upward pressure", "Downward pressure"],
+        "rsi_options":        ["Overbought", "Oversold", "Neutral",
+                               "Peak level", "Low", "Mid"],
+        "macd_options":       ["Bullish divergence", "Bearish divergence",
+                               "Buying pressure", "Selling pressure"],
+        "ma_options":         ["Upward trend", "Downward trend",
+                               "Resistance test", "Support test"],
+        "condition_options":  ["Weak", "Neutral", "Optimal", "Strong", "Critical"],
+    },
+    "es": {
+        "demo_label":        "⚠️ <i>Modo demo. Las señales no son precisas</i>",
+        "locked":            "🔐 Bloqueado",
+        "higher":            "🟢 ALCISTA",
+        "lower":             "🔴 BAJISTA",
+        "overview":          "🔍 Resumen",
+        "price_levels":      "📐 Niveles de Precio",
+        "indicators":        "📊 Indicadores",
+        "signal_strength":   "✅ Fuerza de la Señal",
+        "volatility":        "Volatilidad",
+        "asset_strength":    "Fuerza del Activo",
+        "volume":            "Volumen",
+        "sentiment":         "Sentimiento",
+        "price":             "Precio",
+        "resistance":        "Resistencia (R1)",
+        "support":           "Soporte (S1)",
+        "rsi":               "RSI",
+        "macd":              "MACD",
+        "ma":                "MA",
+        "strength":          "Fuerza",
+        "conditions":        "Condiciones",
+        "expiration":        "Expiración",
+        "direction":         "Dirección",
+        "volatility_options": ["Baja", "Media", "Alta", "Por encima del promedio", "Extrema"],
+        "sentiment_options":  ["Muy alcista", "Alcista", "Neutral",
+                               "Bajista", "Muy bajista",
+                               "Presión alcista", "Presión bajista"],
+        "rsi_options":        ["Sobrecomprado", "Sobrevendido", "Neutral",
+                               "Nivel máximo", "Bajo", "Medio"],
+        "macd_options":       ["Divergencia alcista", "Divergencia bajista",
+                               "Presión compradora", "Presión vendedora"],
+        "ma_options":         ["Tendencia alcista", "Tendencia bajista",
+                               "Prueba de resistencia", "Prueba de soporte"],
+        "condition_options":  ["Débil", "Neutral", "Óptimo", "Fuerte", "Crítico"],
+    },
+    "pt": {
+        "demo_label":        "⚠️ <i>Modo demo. Os sinais não são precisos</i>",
+        "locked":            "🔐 Bloqueado",
+        "higher":            "🟢 ALTA",
+        "lower":             "🔴 BAIXA",
+        "overview":          "🔍 Visão Geral",
+        "price_levels":      "📐 Níveis de Preço",
+        "indicators":        "📊 Indicadores",
+        "signal_strength":   "✅ Força do Sinal",
+        "volatility":        "Volatilidade",
+        "asset_strength":    "Força do Ativo",
+        "volume":            "Volume",
+        "sentiment":         "Sentimento",
+        "price":             "Preço",
+        "resistance":        "Resistência (R1)",
+        "support":           "Suporte (S1)",
+        "rsi":               "RSI",
+        "macd":              "MACD",
+        "ma":                "MA",
+        "strength":          "Força",
+        "conditions":        "Condições",
+        "expiration":        "Expiração",
+        "direction":         "Direção",
+        "volatility_options": ["Baixa", "Média", "Alta", "Acima da média", "Extrema"],
+        "sentiment_options":  ["Muito altista", "Altista", "Neutro",
+                               "Baixista", "Muito baixista",
+                               "Pressão altista", "Pressão baixista"],
+        "rsi_options":        ["Sobrecomprado", "Sobrevendido", "Neutro",
+                               "Nível máximo", "Baixo", "Médio"],
+        "macd_options":       ["Divergência altista", "Divergência baixista",
+                               "Pressão compradora", "Pressão vendedora"],
+        "ma_options":         ["Tendência altista", "Tendência baixista",
+                               "Teste de resistência", "Teste de suporte"],
+        "condition_options":  ["Fraco", "Neutro", "Ótimo", "Forte", "Crítico"],
+    },
+}
+
+
 # карта языковых кодов telegram → коды языков бота
 LANG_MAP = {
     "es": "es",
@@ -253,43 +366,27 @@ def new_bot(bot_instance: Bot):
                 bot=bot_instance, chat_id=str(chat_id)
             ).exists()
 
-            volatility_options = [
-                "Low", "Medium", "High", "Above average", "Extreme"
-            ]
-            sentiment_options = [
-                "Strong bullish", "Bullish", "Neutral",
-                "Bearish", "Strong bearish",
-                "Upward pressure", "Downward pressure",
-            ]
+            # берём переводы для текущего языка, fallback → en
+            i18n = _SIGNAL_I18N.get(language) or _SIGNAL_I18N["en"]
 
             if has_full_access:
-                rsi_options = [
-                    "Overbought", "Oversold", "Neutral",
-                    "Peak level", "Low", "Mid",
-                ]
-                macd_options = [
-                    "Bullish divergence", "Bearish divergence",
-                    "Buying pressure", "Selling pressure",
-                ]
-                ma_options = [
-                    "Upward trend", "Downward trend",
-                    "Resistance test", "Support test",
-                ]
-                condition_options = [
-                    "Weak", "Neutral", "Optimal", "Strong", "Critical"
-                ]
-                strength = random.randint(80, 99)
-                demo_label = ""
+                rsi_options       = i18n["rsi_options"]
+                macd_options      = i18n["macd_options"]
+                ma_options        = i18n["ma_options"]
+                condition_options = i18n["condition_options"]
+                strength          = random.randint(80, 99)
+                demo_label        = ""
             else:
                 # демо-режим — ограниченные данные
-                rsi_options = ["🔐 Locked"]
-                macd_options = ["🔐 Locked"]
-                ma_options = ["🔐 Locked"]
-                condition_options = ["🔐 Locked"]
-                strength = "🔐 Locked"
-                demo_label = "\n⚠️ <i>Demo mode. Signals are not accurate</i>\n"
+                locked            = i18n["locked"]
+                rsi_options       = [locked]
+                macd_options      = [locked]
+                ma_options        = [locked]
+                condition_options = [locked]
+                strength          = locked
+                demo_label        = "\n" + i18n["demo_label"] + "\n"
 
-            direction_label = "🟢 HIGHER" if directions == "higher" else "🔴 LOWER"
+            direction_label = i18n["higher"] if directions == "higher" else i18n["lower"]
 
             # извлекаем данные пары и экспирации из callback_data
             try:
@@ -300,26 +397,27 @@ def new_bot(bot_instance: Bot):
                 logger.error("ошибка парсинга данных сигнала: %s", e)
                 return
 
-            text = f"{demo_label}"
+            t = i18n  # короткий алиас
+            text  = f"{demo_label}"
             text += f"<b>{pair_symbol}</b>\n\n"
-            text += "🔍 Overview:\n"
-            text += f"• Volatility: <code>{random.choice(volatility_options)}</code> ⚡️\n"
-            text += f"• Asset Strength: <code>{random.randint(20, 90)}%</code> 💪\n"
-            text += f"• Volume: <code>{random.randint(20, 90)}%</code> 📦\n"
-            text += f"• Sentiment: <code>{random.choice(sentiment_options)}</code> 📊\n\n"
-            text += "📐 Price Levels:\n"
-            text += f"• Price: <code>{price}</code> 💵\n"
-            text += f"• Resistance (R1): <code>{price}</code> 🛑\n"
-            text += f"• Support (S1): <code>{price}</code> 🟢\n\n"
-            text += "📊 Indicators:\n"
-            text += f"• RSI: <code>{random.choice(rsi_options)}</code>\n"
-            text += f"• MACD: <code>{random.choice(macd_options)}</code>\n"
-            text += f"• MA: <code>{random.choice(ma_options)}</code>\n\n"
-            text += "✅ Signal Strength:\n"
-            text += f"• Strength: <code>{strength}%</code> 🧠\n"
-            text += f"• Conditions: <code>{random.choice(condition_options)}</code>\n\n"
-            text += f"📅 Expiration: <code>{expiration}</code>\n"
-            text += f"📊 Direction: <code>{direction_label}</code>\n"
+            text += f"{t['overview']}:\n"
+            text += f"• {t['volatility']}: <code>{random.choice(t['volatility_options'])}</code> ⚡️\n"
+            text += f"• {t['asset_strength']}: <code>{random.randint(20, 90)}%</code> 💪\n"
+            text += f"• {t['volume']}: <code>{random.randint(20, 90)}%</code> 📦\n"
+            text += f"• {t['sentiment']}: <code>{random.choice(t['sentiment_options'])}</code> 📊\n\n"
+            text += f"{t['price_levels']}:\n"
+            text += f"• {t['price']}: <code>{price}</code> 💵\n"
+            text += f"• {t['resistance']}: <code>{price}</code> 🛑\n"
+            text += f"• {t['support']}: <code>{price}</code> 🟢\n\n"
+            text += f"{t['indicators']}:\n"
+            text += f"• {t['rsi']}: <code>{random.choice(rsi_options)}</code>\n"
+            text += f"• {t['macd']}: <code>{random.choice(macd_options)}</code>\n"
+            text += f"• {t['ma']}: <code>{random.choice(ma_options)}</code>\n\n"
+            text += f"{t['signal_strength']}:\n"
+            text += f"• {t['strength']}: <code>{strength}%</code> 🧠\n"
+            text += f"• {t['conditions']}: <code>{random.choice(condition_options)}</code>\n\n"
+            text += f"📅 {t['expiration']}: <code>{expiration}</code>\n"
+            text += f"📊 {t['direction']}: <code>{direction_label}</code>\n"
         else:
             text = msg_data.get("text", "")
 
