@@ -398,7 +398,7 @@ def new_bot(bot_instance: Bot):
                 return
 
             t = i18n  # короткий алиас
-            text  = f"{demo_label}"
+            text  = f"{demo_label}\n" if demo_label else ""
             text += f"<b>{pair_symbol}</b>\n\n"
             text += f"{t['overview']}:\n"
             text += f"• {t['volatility']}: <code>{random.choice(t['volatility_options'])}</code> ⚡️\n"
